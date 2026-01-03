@@ -642,6 +642,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
 
       const failedServices = serviceNames.filter((_, index) => {
         const result = results[index]
+        if (!result) return true
         return result.status === 'rejected' || (result.status === 'fulfilled' && result.value === false)
       })
 
