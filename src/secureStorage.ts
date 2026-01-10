@@ -270,35 +270,6 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
   }
 
   /**
-   * Authenticate if device supports it
-   * Returns true if authentication succeeded or was skipped (device doesn't support auth)
-   * Returns false if authentication was required but failed
-   */
-  async function authenticateIfAvailable(identifier?: string): Promise<boolean> {
-    // Check device auth first (cached) to avoid duplicate isEnrolledAsync calls
-    const deviceAuthAvailable = await isDeviceAuthenticationAvailable()
-    if (!deviceAuthAvailable) {
-      return true // No auth available, skip
-    }
-
-    // Device auth is available, check if biometrics are available
-    const biometricAvailable = await checkBiometricAvailable()
-    if (!biometricAvailable) {
-      // Device has PIN/password but no biometrics - proceed without prompt
-      return true
-    }
-
-    // Biometrics available, attempt authentication
-    const authenticated = await performAuthentication()
-    if (authenticated) {
-      logger.info('Authentication successful', { identifier })
-    } else {
-      logger.warn('Authentication failed', { identifier })
-    }
-    return authenticated
-  }
-
-  /**
    * Generic setter for secure values
    * 
    * @param baseKey - The base storage key (e.g., ENCRYPTION_KEY)
@@ -411,16 +382,21 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     validateIdentifier(identifier)
 
     try {
-      if (requireAuth && !(await authenticateIfAvailable(identifier))) {
-        logger.warn('Authentication required but failed', { baseKey, identifier })
-        throw new AuthenticationError('Authentication required but failed')
-      }
-
       const storageKey = await getStorageKey(baseKey, identifier)
       logger.debug('Retrieving secure value', { baseKey, identifier })
 
+      const keychainOptions = requireAuth
+        ? {
+            service: storageKey,
+            authenticationPrompt: {
+              title: authOptions.promptMessage || 'Authenticate to access your wallet',
+              cancel: authOptions.cancelLabel || 'Cancel',
+            },
+          }
+        : { service: storageKey }
+
       const credentials = await withTimeout(
-        Keychain.getGenericPassword({ service: storageKey }),
+        Keychain.getGenericPassword(keychainOptions),
         timeoutMs,
         `getSecureValue(${baseKey})`
       )

@@ -204,10 +204,7 @@ describe('SecureStorage', () => {
       await expect(storage.getEncryptionKey()).rejects.toThrow(KeychainReadError)
     })
 
-    it('should require authentication when available', async () => {
-      mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
-      mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
-      mockLocalAuth.authenticateAsync.mockResolvedValue({ success: true })
+    it('should pass authenticationPrompt to keychain when requireAuth is true', async () => {
       mockKeychain.getGenericPassword.mockResolvedValue({
         service: 'test',
         username: 'test',
@@ -217,19 +214,25 @@ describe('SecureStorage', () => {
 
       await storage.getEncryptionKey()
 
-      expect(mockLocalAuth.authenticateAsync).toHaveBeenCalled()
+      // Authentication is now handled natively by keychain via authenticationPrompt
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authenticationPrompt: {
+            title: 'Authenticate to access your wallet',
+            cancel: 'Cancel',
+          },
+        })
+      )
+      // Manual authentication should NOT be called
+      expect(mockLocalAuth.authenticateAsync).not.toHaveBeenCalled()
     })
 
-    it('should throw AuthenticationError when authentication fails', async () => {
-      mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
-      mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
-      mockLocalAuth.authenticateAsync.mockResolvedValue({ 
-        success: false, 
-        error: 'user_cancel' 
-      })
+    it('should throw KeychainReadError when keychain authentication fails', async () => {
+      // When keychain native auth fails, it throws an error
+      const keychainAuthError = new Error('User cancelled authentication')
+      mockKeychain.getGenericPassword.mockRejectedValue(keychainAuthError)
 
-      await expect(storage.getEncryptionKey()).rejects.toThrow(AuthenticationError)
-      expect(mockKeychain.getGenericPassword).not.toHaveBeenCalled()
+      await expect(storage.getEncryptionKey()).rejects.toThrow(KeychainReadError)
     })
   })
 
@@ -974,18 +977,32 @@ describe('SecureStorage', () => {
     })
 
 
-    it('should return true when device auth available but not biometric', async () => {
-      // Device auth available, but biometric not available
-      // This tests the path where isDeviceAuthenticationAvailable returns true
-      // but isBiometricAvailable returns false
-      mockLocalAuth.isEnrolledAsync.mockResolvedValueOnce(true)
-      mockLocalAuth.hasHardwareAsync.mockResolvedValueOnce(true) // Has hardware
-      mockLocalAuth.isEnrolledAsync.mockResolvedValueOnce(true) // Is enrolled
-      mockLocalAuth.hasHardwareAsync.mockResolvedValueOnce(false) // But biometric not available
-      
-      // Should succeed without requiring authentication (line 263)
-      await storage.getEncryptionKey()
-      expect(mockKeychain.getGenericPassword).toHaveBeenCalled()
+    it('should pass authenticationPrompt with custom options', async () => {
+      const customStorage = createSecureStorage({
+        logger: mockLogger,
+        authentication: {
+          promptMessage: 'Custom message',
+          cancelLabel: 'Custom cancel',
+        },
+      })
+
+      mockKeychain.getGenericPassword.mockResolvedValue({
+        service: 'test',
+        username: 'test',
+        password: 'test-key',
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      })
+
+      await customStorage.getEncryptionKey()
+
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authenticationPrompt: {
+            title: 'Custom message',
+            cancel: 'Custom cancel',
+          },
+        })
+      )
     })
 
   })
