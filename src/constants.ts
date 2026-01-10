@@ -10,3 +10,17 @@ export const MAX_TIMEOUT_MS = 5 * 60 * 1000
  */
 export const DEVICE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000
 
+
+/**
+ * Cache TTL for successful authentication results (30 seconds)
+ * This prevents repeated authentication prompts for rapid successive operations
+ * while maintaining security with a short grace period.
+ */
+export const AUTH_RESULT_CACHE_TTL_MS = 30 * 1000
+
+/**
+ * Cache TTL for successful authentication results (30 seconds)
+ * This prevents repeated authentication prompts for rapid successive operations
+ * while maintaining security with a short grace period.
+ */
+export const AUTH_RESULT_CACHE_TTL_MS = 30 * 1000

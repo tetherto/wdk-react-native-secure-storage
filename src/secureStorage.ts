@@ -3,7 +3,7 @@ import * as Keychain from 'react-native-keychain'
 import * as LocalAuthentication from 'expo-local-authentication'
 
 // Internal modules
-import { DEFAULT_TIMEOUT_MS, DEVICE_AUTH_CACHE_TTL_MS } from './constants'
+import { DEFAULT_TIMEOUT_MS, DEVICE_AUTH_CACHE_TTL_MS, AUTH_RESULT_CACHE_TTL_MS } from './constants'
 import {
   AuthenticationError,
   KeychainReadError,
@@ -146,6 +146,10 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
   // Cache expires after TTL to handle device settings changes
   let deviceAuthAvailableCache: { value: boolean; timestamp: number } | null = null
 
+  // Cache for successful authentication results (per instance)
+  // Cache expires after TTL to maintain security while improving UX
+  let authResultCache: { timestamp: number } | null = null
+
   /**
    * Error log message generators for consistent error handling
    */
@@ -273,8 +277,19 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
    * Authenticate if device supports it
    * Returns true if authentication succeeded or was skipped (device doesn't support auth)
    * Returns false if authentication was required but failed
+   * 
+   * Successful authentications are cached for a short period (AUTH_RESULT_CACHE_TTL_MS)
+   * to avoid repeated prompts for rapid successive operations.
    */
   async function authenticateIfAvailable(identifier?: string): Promise<boolean> {
+    const now = Date.now()
+    
+    // Check if we have a valid cached authentication result
+    if (authResultCache !== null && (now - authResultCache.timestamp) < AUTH_RESULT_CACHE_TTL_MS) {
+      logger.debug('Using cached authentication result', { identifier })
+      return true
+    }
+
     // Check device auth first (cached) to avoid duplicate isEnrolledAsync calls
     const deviceAuthAvailable = await isDeviceAuthenticationAvailable()
     if (!deviceAuthAvailable) {
@@ -291,8 +306,12 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     // Biometrics available, attempt authentication
     const authenticated = await performAuthentication()
     if (authenticated) {
+      // Cache successful authentication result
+      authResultCache = { timestamp: now }
       logger.info('Authentication successful', { identifier })
     } else {
+      // Clear cache on failure to ensure next attempt prompts again
+      authResultCache = null
       logger.warn('Authentication failed', { identifier })
     }
     return authenticated
