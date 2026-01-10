@@ -411,11 +411,6 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     validateIdentifier(identifier)
 
     try {
-      if (requireAuth && !(await authenticateIfAvailable(identifier))) {
-        logger.warn('Authentication required but failed', { baseKey, identifier })
-        throw new AuthenticationError('Authentication required but failed')
-      }
-
       const storageKey = await getStorageKey(baseKey, identifier)
       logger.debug('Retrieving secure value', { baseKey, identifier })
 
