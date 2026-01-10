@@ -269,6 +269,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
       }
   }
 
+
   /**
    * Generic setter for secure values
    * 
@@ -385,8 +386,27 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
       const storageKey = await getStorageKey(baseKey, identifier)
       logger.debug('Retrieving secure value', { baseKey, identifier })
 
+      let getOptions: Parameters<typeof Keychain.getGenericPassword>[0] = {
+        service: storageKey
+      }
+
+      // Use Keychain built-in authentication when required
+      if (requireAuth) {
+        const deviceAuthAvailable = await isDeviceAuthenticationAvailable()
+        if (deviceAuthAvailable) {
+          // Device supports authentication, let Keychain handle biometric/passcode prompt
+          // BIOMETRY_ANY_OR_DEVICE_PASSCODE access control will auto-fallback
+          getOptions.authenticationPrompt = {
+            title: authOptions.promptMessage || 'Authenticate to access your wallet'
+          }
+          logger.debug('Using Keychain authentication with prompt', { baseKey, identifier })
+        } else {
+          logger.info('Device authentication not available - proceeding without prompt', { baseKey, identifier })
+        }
+      }
+
       const credentials = await withTimeout(
-        Keychain.getGenericPassword({ service: storageKey }),
+        Keychain.getGenericPassword(getOptions),
         timeoutMs,
         `getSecureValue(${baseKey})`
       )
@@ -608,7 +628,6 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
 
       const failedServices = serviceNames.filter((_, index) => {
         const result = results[index]
-        if (!result) return true
         return result.status === 'rejected' || (result.status === 'fulfilled' && result.value === false)
       })
 
