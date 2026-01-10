@@ -204,9 +204,10 @@ describe('SecureStorage', () => {
       await expect(storage.getEncryptionKey()).rejects.toThrow(KeychainReadError)
     })
 
-    it('should use Keychain authentication when device auth is available', async () => {
+    it('should require authentication when available', async () => {
       mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
       mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
+      mockLocalAuth.authenticateAsync.mockResolvedValue({ success: true })
       mockKeychain.getGenericPassword.mockResolvedValue({
         service: 'test',
         username: 'test',
@@ -216,25 +217,19 @@ describe('SecureStorage', () => {
 
       await storage.getEncryptionKey()
 
-      expect(mockKeychain.getGenericPassword).toHaveBeenCalledWith({
-        service: expect.stringContaining('wallet_encryption_key'),
-        authenticationPrompt: {
-          title: expect.stringContaining('Authenticate to access your wallet')
-        }
-      })
+      expect(mockLocalAuth.authenticateAsync).toHaveBeenCalled()
     })
 
-    it('should throw error when Keychain authentication fails', async () => {
+    it('should throw AuthenticationError when authentication fails', async () => {
       mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
       mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
-      const authError = new Error('Authentication failed')
-      mockKeychain.getGenericPassword.mockRejectedValue(authError)
-
-      await expect(storage.getEncryptionKey()).rejects.toThrow(KeychainReadError)
-      expect(mockKeychain.getGenericPassword).toHaveBeenCalledWith({
-        service: expect.stringContaining('wallet_encryption_key'),
-        authenticationPrompt: expect.any(Object)
+      mockLocalAuth.authenticateAsync.mockResolvedValue({ 
+        success: false, 
+        error: 'user_cancel' 
       })
+
+      await expect(storage.getEncryptionKey()).rejects.toThrow(AuthenticationError)
+      expect(mockKeychain.getGenericPassword).not.toHaveBeenCalled()
     })
   })
 

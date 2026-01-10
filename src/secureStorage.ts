@@ -269,6 +269,34 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
       }
   }
 
+  /**
+   * Authenticate if device supports it
+   * Returns true if authentication succeeded or was skipped (device doesn't support auth)
+   * Returns false if authentication was required but failed
+   */
+  async function authenticateIfAvailable(identifier?: string): Promise<boolean> {
+    // Check device auth first (cached) to avoid duplicate isEnrolledAsync calls
+    const deviceAuthAvailable = await isDeviceAuthenticationAvailable()
+    if (!deviceAuthAvailable) {
+      return true // No auth available, skip
+    }
+
+    // Device auth is available, check if biometrics are available
+    const biometricAvailable = await checkBiometricAvailable()
+    if (!biometricAvailable) {
+      // Device has PIN/password but no biometrics - proceed without prompt
+      return true
+    }
+
+    // Biometrics available, attempt authentication
+    const authenticated = await performAuthentication()
+    if (authenticated) {
+      logger.info('Authentication successful', { identifier })
+    } else {
+      logger.warn('Authentication failed', { identifier })
+    }
+    return authenticated
+  }
 
   /**
    * Generic setter for secure values
@@ -383,30 +411,21 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     validateIdentifier(identifier)
 
     try {
+      // For encryption key (requireAuth=true), explicitly authenticate before keychain access.
+      // This ensures biometrics are triggered. The keychain's ACCESS_CONTROL may not always
+      // automatically prompt, especially if authentication was recently completed.
+      // The mutex protection in WalletSetupService.loadExistingWallet() prevents parallel
+      // calls from causing multiple biometric prompts.
+      if (requireAuth && !(await authenticateIfAvailable(identifier))) {
+        logger.warn('Authentication required but failed', { baseKey, identifier })
+        throw new AuthenticationError('Authentication required but failed')
+      }
+
       const storageKey = await getStorageKey(baseKey, identifier)
       logger.debug('Retrieving secure value', { baseKey, identifier })
 
-      let getOptions: Parameters<typeof Keychain.getGenericPassword>[0] = {
-        service: storageKey
-      }
-
-      // Use Keychain built-in authentication when required
-      if (requireAuth) {
-        const deviceAuthAvailable = await isDeviceAuthenticationAvailable()
-        if (deviceAuthAvailable) {
-          // Device supports authentication, let Keychain handle biometric/passcode prompt
-          // BIOMETRY_ANY_OR_DEVICE_PASSCODE access control will auto-fallback
-          getOptions.authenticationPrompt = {
-            title: authOptions.promptMessage || 'Authenticate to access your wallet'
-          }
-          logger.debug('Using Keychain authentication with prompt', { baseKey, identifier })
-        } else {
-          logger.info('Device authentication not available - proceeding without prompt', { baseKey, identifier })
-        }
-      }
-
       const credentials = await withTimeout(
-        Keychain.getGenericPassword(getOptions),
+        Keychain.getGenericPassword({ service: storageKey }),
         timeoutMs,
         `getSecureValue(${baseKey})`
       )
@@ -628,6 +647,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
 
       const failedServices = serviceNames.filter((_, index) => {
         const result = results[index]
+        if (!result) return true
         return result.status === 'rejected' || (result.status === 'fulfilled' && result.value === false)
       })
 
