@@ -371,7 +371,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
    * @throws {ValidationError} If identifier validation fails
    * @throws {AuthenticationError} If authentication fails (when required)
    * @throws {KeychainReadError} If keychain operation fails
-   * @throws {TimeoutError} If operation times out
+   * @throws {TimeoutError} If operation times out (only for non-auth operations)
    * @internal
    */
   async function getSecureValue(
@@ -383,7 +383,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
 
     try {
       const storageKey = await getStorageKey(baseKey, identifier)
-      logger.debug('Retrieving secure value', { baseKey, identifier })
+      logger.debug('Retrieving secure value', { baseKey, identifier, requireAuth })
 
       const keychainOptions = requireAuth
         ? {
@@ -395,11 +395,13 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
           }
         : { service: storageKey }
 
-      const credentials = await withTimeout(
-        Keychain.getGenericPassword(keychainOptions),
-        timeoutMs,
-        `getSecureValue(${baseKey})`
-      )
+      // For auth-required operations (biometrics), don't use timeout.
+      // Biometric authentication should wait indefinitely for user interaction.
+      // Only apply timeout for non-auth operations which should complete quickly.
+      const keychainPromise = Keychain.getGenericPassword(keychainOptions)
+      const credentials = requireAuth
+        ? await keychainPromise // No timeout for biometrics - wait for user
+        : await withTimeout(keychainPromise, timeoutMs, `getSecureValue(${baseKey})`)
 
       if (!isKeychainCredentials(credentials)) {
         logger.debug('Secure value not found', { baseKey, identifier })
@@ -563,6 +565,11 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      * Check if wallet credentials exist (without requiring authentication)
      * Returns false only when wallet is definitively not found. Errors are thrown.
      * 
+     * IMPORTANT: Only checks encrypted seed, NOT encryption key.
+     * Encryption key is protected with biometrics, so checking it would trigger
+     * an authentication prompt. Encrypted seed is stored without auth requirement,
+     * so checking it won't trigger biometrics.
+     * 
      * @param identifier - Optional identifier (e.g., email) to support multiple wallets
      * @returns true if wallet exists, false if definitively not found
      * @throws {ValidationError} If identifier is invalid format
@@ -570,18 +577,14 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      * @throws {KeychainReadError} If keychain operation fails
      */
     async hasWallet(identifier?: string): Promise<boolean> {
-      // Batch storage key generation for efficiency
-      const [seedStorageKey, encryptionKeyStorageKey] = await Promise.all([
-        getStorageKey(ENCRYPTED_SEED, identifier),
-        getStorageKey(ENCRYPTION_KEY, identifier),
-      ])
-
-      // Short-circuit: if seed doesn't exist, no need to check encryption key
-      if (!(await checkKeyExists(seedStorageKey))) {
-        return false
-      }
-
-      return await checkKeyExists(encryptionKeyStorageKey)
+      // ONLY check encrypted seed - it does NOT require biometrics
+      // Encryption key is protected with ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE,
+      // so checking it would trigger a biometric prompt with the default
+      // "Authenticate to retrieve secret" message from react-native-keychain.
+      // By only checking the seed (which is stored without auth requirement),
+      // we can determine wallet existence without triggering biometrics.
+      const seedStorageKey = await getStorageKey(ENCRYPTED_SEED, identifier)
+      return await checkKeyExists(seedStorageKey)
     },
 
     /**
