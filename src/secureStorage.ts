@@ -64,15 +64,6 @@ export interface SecureStorageOptions {
  * - Validation errors are thrown before any operations
  */
 export interface SecureStorage {
-  /**
-   * Check if device security (PIN/pattern/password/biometrics) is enabled
-   * 
-   * On Android, secure storage requires device security to be configured.
-   * Apps can use this to check before attempting wallet operations and
-   * guide users to enable device security if needed.
-   * 
-   * @returns Promise resolving to true if device security is enabled, false otherwise
-   */
   isDeviceSecurityEnabled(): Promise<boolean>
   isBiometricAvailable(): Promise<boolean>
   authenticate(): Promise<boolean>
@@ -454,9 +445,9 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     /**
      * Check if device security (PIN/pattern/password/biometrics) is enabled
      * 
-     * On Android, secure storage requires device security to be configured.
-     * Apps can use this to check before attempting wallet operations and
-     * guide users to enable device security if needed.
+     * Apps can use this to check device security status and decide whether to
+     * require users to enable a PIN/pattern/password before storing sensitive data.
+     * The library will function without device security (data is still encrypted at rest).
      * 
      * @returns Promise resolving to true if device security is enabled, false otherwise
      */
