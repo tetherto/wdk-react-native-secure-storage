@@ -3,7 +3,7 @@ import * as Keychain from 'react-native-keychain'
 import * as LocalAuthentication from 'expo-local-authentication'
 
 // Internal modules
-import { DEFAULT_TIMEOUT_MS, DEVICE_AUTH_CACHE_TTL_MS } from './constants'
+import { DEFAULT_TIMEOUT_MS } from './constants'
 import {
   AuthenticationError,
   KeychainReadError,
@@ -64,6 +64,16 @@ export interface SecureStorageOptions {
  * - Validation errors are thrown before any operations
  */
 export interface SecureStorage {
+  /**
+   * Check if device security (PIN/pattern/password/biometrics) is enabled
+   * 
+   * On Android, secure storage requires device security to be configured.
+   * Apps can use this to check before attempting wallet operations and
+   * guide users to enable device security if needed.
+   * 
+   * @returns Promise resolving to true if device security is enabled, false otherwise
+   */
+  isDeviceSecurityEnabled(): Promise<boolean>
   isBiometricAvailable(): Promise<boolean>
   authenticate(): Promise<boolean>
   setEncryptionKey(key: string, identifier?: string): Promise<void>
@@ -142,10 +152,6 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
   
   const timeoutMs = requestedTimeout || DEFAULT_TIMEOUT_MS
 
-  // Cache for device authentication availability (per instance)
-  // Cache expires after TTL to handle device settings changes
-  let deviceAuthAvailableCache: { value: boolean; timestamp: number } | null = null
-
   /**
    * Error log message generators for consistent error handling
    */
@@ -192,32 +198,20 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
   }
 
   /**
-   * Check if device authentication is available
-   * This includes biometrics OR device PIN/password
+   * Get the device security level
    * 
-   * Results are cached per instance with a 5-minute TTL to avoid repeated async calls
-   * while allowing cache invalidation when device settings change.
-   * 
-   * @returns Promise that resolves to true if device authentication is available, false otherwise
+   * @returns The security level: NONE, SECRET (PIN/pattern), or BIOMETRIC
    * @internal
    */
-  async function isDeviceAuthenticationAvailable(): Promise<boolean> {
-    const now = Date.now()
-    
-    // Return cached value if available and not expired
-    if (deviceAuthAvailableCache !== null && (now - deviceAuthAvailableCache.timestamp) < DEVICE_AUTH_CACHE_TTL_MS) {
-      return deviceAuthAvailableCache.value
-    }
-
+  async function getDeviceSecurityLevel(): Promise<LocalAuthentication.SecurityLevel> {
     try {
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync()
-      deviceAuthAvailableCache = { value: isEnrolled, timestamp: now }
-      return isEnrolled
+      const securityLevel = await LocalAuthentication.getEnrolledLevelAsync()
+      logger.debug('Device security level', { securityLevel })
+      return securityLevel
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error))
-      logger.error('Failed to check device authentication availability', err, {})
-      deviceAuthAvailableCache = { value: false, timestamp: now }
-      return false
+      logger.warn('Failed to check device security level, assuming NONE', { error: err.message })
+      return LocalAuthentication.SecurityLevel.NONE
     }
   }
 
@@ -293,10 +287,25 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     validateIdentifier(identifier)
 
     try {
-      const [deviceAuthAvailable, storageKey] = await Promise.all([
-        isDeviceAuthenticationAvailable(),
+      // Use getEnrolledLevelAsync for more accurate device security detection
+      // This handles the Android case where device might not have any security configured
+      const [securityLevel, storageKey] = await Promise.all([
+        getDeviceSecurityLevel(),
         getStorageKey(baseKey, identifier),
       ])
+      
+      // Device has authentication if security level is not NONE
+      const deviceAuthAvailable = securityLevel !== LocalAuthentication.SecurityLevel.NONE
+      
+      // If auth was requested but device has no security, log a warning but proceed without auth
+      // Data will still be encrypted at rest by the OS, just not protected by user authentication
+      if (requireAuth && !deviceAuthAvailable) {
+        logger.warn('Device has no security configured. Storing data without authentication protection.', { 
+          baseKey, 
+          identifier,
+          securityLevel 
+        })
+      }
 
       logger.debug('Storing secure value', { baseKey, identifier, requireAuth, syncable })
 
@@ -369,7 +378,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
    * @param requireAuth - Whether authentication is required (default: true)
    * @returns The stored value, or null if not found
    * @throws {ValidationError} If identifier validation fails
-   * @throws {AuthenticationError} If authentication fails (when required)
+   * @throws {AuthenticationError} If authentication fails (when required and device has security)
    * @throws {KeychainReadError} If keychain operation fails
    * @throws {TimeoutError} If operation times out (only for non-auth operations)
    * @internal
@@ -382,10 +391,30 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
     validateIdentifier(identifier)
 
     try {
-      const storageKey = await getStorageKey(baseKey, identifier)
-      logger.debug('Retrieving secure value', { baseKey, identifier, requireAuth })
+      // Check device security level to determine if auth is actually possible
+      const [securityLevel, storageKey] = await Promise.all([
+        getDeviceSecurityLevel(),
+        getStorageKey(baseKey, identifier),
+      ])
+      
+      // Device has authentication if security level is not NONE
+      const deviceAuthAvailable = securityLevel !== LocalAuthentication.SecurityLevel.NONE
+      
+      // If auth was requested but device has no security, read without auth
+      // Data was stored without auth protection on this device, so we can read it without auth
+      const actuallyRequireAuth = requireAuth && deviceAuthAvailable
+      
+      if (requireAuth && !deviceAuthAvailable) {
+        logger.warn('Device has no security configured. Reading data without authentication.', { 
+          baseKey, 
+          identifier,
+          securityLevel 
+        })
+      }
+      
+      logger.debug('Retrieving secure value', { baseKey, identifier, requireAuth, actuallyRequireAuth })
 
-      const keychainOptions = requireAuth
+      const keychainOptions = actuallyRequireAuth
         ? {
             service: storageKey,
             authenticationPrompt: {
@@ -399,7 +428,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
       // Biometric authentication should wait indefinitely for user interaction.
       // Only apply timeout for non-auth operations which should complete quickly.
       const keychainPromise = Keychain.getGenericPassword(keychainOptions)
-      const credentials = requireAuth
+      const credentials = actuallyRequireAuth
         ? await keychainPromise // No timeout for biometrics - wait for user
         : await withTimeout(keychainPromise, timeoutMs, `getSecureValue(${baseKey})`)
 
@@ -422,6 +451,29 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
 
   // Create and return the instance
   return {
+    /**
+     * Check if device security (PIN/pattern/password/biometrics) is enabled
+     * 
+     * On Android, secure storage requires device security to be configured.
+     * Apps can use this to check before attempting wallet operations and
+     * guide users to enable device security if needed.
+     * 
+     * @returns Promise resolving to true if device security is enabled, false otherwise
+     */
+    async isDeviceSecurityEnabled(): Promise<boolean> {
+      try {
+        const securityLevel = await LocalAuthentication.getEnrolledLevelAsync()
+        const isEnabled = securityLevel !== LocalAuthentication.SecurityLevel.NONE
+        logger.debug('Device security check', { securityLevel, isEnabled })
+        return isEnabled
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error))
+        logger.warn('Failed to check device security level', { error: err.message })
+        // If we can't check, assume it's not enabled to be safe
+        return false
+      }
+    },
+
     /**
      * Check if biometric authentication is available
      */

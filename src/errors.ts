@@ -82,3 +82,16 @@ export class TimeoutError extends SecureStorageError {
   }
 }
 
+/**
+ * Error thrown when device security (PIN/pattern/password/biometrics) is not enabled
+ * 
+ * This error can be used by apps that want to enforce device security as a prerequisite.
+ * Whether to require device security is up to the app - the library will still function
+ * on devices without authentication configured (data remains encrypted at rest).
+ */
+export class DeviceSecurityNotEnabledError extends SecureStorageError {
+  constructor(message: string = 'Device security is not enabled. Please set up a PIN, pattern, or password in your device settings to use secure wallet storage.', cause?: Error) {
+    super(message, 'DEVICE_SECURITY_NOT_ENABLED', cause)
+    this.name = 'DeviceSecurityNotEnabledError'
+  }
+}
