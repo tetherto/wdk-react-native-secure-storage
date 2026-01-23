@@ -22,6 +22,7 @@ export {
   AuthenticationError,
   ValidationError,
   TimeoutError,
+  DeviceSecurityNotEnabledError,
 } from './errors'
 
 // Logger types

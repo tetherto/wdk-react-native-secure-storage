@@ -43,6 +43,12 @@ jest.mock('expo-local-authentication', () => ({
   isEnrolledAsync: jest.fn(),
   hasHardwareAsync: jest.fn(),
   authenticateAsync: jest.fn(),
+  getEnrolledLevelAsync: jest.fn(),
+  SecurityLevel: {
+    NONE: 0,
+    SECRET: 1,
+    BIOMETRIC: 2,
+  },
 }))
 
 jest.mock('expo-crypto', () => ({
@@ -84,6 +90,8 @@ describe('SecureStorage', () => {
     mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
     mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
     mockLocalAuth.authenticateAsync.mockResolvedValue({ success: true })
+    // Default to BIOMETRIC security level (device has authentication)
+    ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
     
     mockKeychain.setGenericPassword.mockResolvedValue({ 
       service: 'test', 
@@ -438,23 +446,18 @@ describe('SecureStorage', () => {
 
   describe('hasWallet', () => {
     it('should return true when wallet exists', async () => {
-      mockKeychain.getGenericPassword
-        .mockResolvedValueOnce({
-          service: 'test',
-          username: 'wallet_encrypted_seed',
-          password: 'seed-data',
-          storage: Keychain.STORAGE_TYPE.AES_GCM,
-        })
-        .mockResolvedValueOnce({
-          service: 'test',
-          username: 'wallet_encryption_key',
-          password: 'key-data',
-          storage: Keychain.STORAGE_TYPE.AES_GCM,
-        })
+      // hasWallet only checks seed existence, not encryption key
+      mockKeychain.getGenericPassword.mockResolvedValueOnce({
+        service: 'test',
+        username: 'wallet_encrypted_seed',
+        password: 'seed-data',
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      })
 
       const exists = await storage.hasWallet()
 
       expect(exists).toBe(true)
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1)
     })
 
     it('should return false when wallet does not exist', async () => {
@@ -574,6 +577,8 @@ describe('SecureStorage', () => {
 
   describe('concurrent operations', () => {
     beforeEach(() => {
+      // Ensure getEnrolledLevelAsync is mocked before resetStorage
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
       resetStorage()
     })
 
@@ -636,6 +641,9 @@ describe('SecureStorage', () => {
       // Clear mocks
       jest.clearAllMocks()
       
+      // Re-setup required mocks after clearAllMocks
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+      
       // Create storage with short timeout (minimum is 1000ms)
       const fastStorage = createSecureStorage({ logger: mockLogger, timeoutMs: 1500 })
 
@@ -696,9 +704,10 @@ describe('SecureStorage', () => {
       jest.clearAllMocks()
       mockKeychain.getGenericPassword.mockReset()
       
-      // Set up mocks for this specific test
+      // Set up mocks for this specific test - device has NO authentication
       mockLocalAuth.isEnrolledAsync.mockResolvedValue(false)
       mockLocalAuth.hasHardwareAsync.mockResolvedValue(false)
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(0) // SecurityLevel.NONE
       
       const noAuthStorage = createSecureStorage({ logger: mockLogger })
       
@@ -752,20 +761,20 @@ describe('SecureStorage', () => {
       expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1)
     })
 
-    it('should return false when encryption key does not exist but seed exists', async () => {
-      mockKeychain.getGenericPassword
-        .mockResolvedValueOnce({
-          service: 'test',
-          username: 'wallet_encrypted_seed',
-          password: 'seed-data',
-          storage: Keychain.STORAGE_TYPE.AES_GCM,
-        })
-        .mockResolvedValueOnce(false)
+    it('should return true when seed exists (encryption key is not checked)', async () => {
+      // hasWallet only checks seed existence, not encryption key
+      mockKeychain.getGenericPassword.mockResolvedValueOnce({
+        service: 'test',
+        username: 'wallet_encrypted_seed',
+        password: 'seed-data',
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      })
 
       const exists = await storage.hasWallet()
 
-      expect(exists).toBe(false)
-      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(2)
+      expect(exists).toBe(true)
+      // Should only check seed, not encryption key
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1)
     })
 
     it('should throw error with context when keychain fails', async () => {
@@ -814,28 +823,14 @@ describe('SecureStorage', () => {
       expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1)
     })
 
-    it('should return false when encryption key exists but password is null', async () => {
-      mockKeychain.getGenericPassword
-        .mockResolvedValueOnce({
-          service: 'test',
-          username: 'wallet_encrypted_seed',
-          password: 'seed-data',
-          storage: Keychain.STORAGE_TYPE.AES_GCM,
-        })
-        .mockResolvedValueOnce({
-          service: 'test',
-          username: 'wallet_encryption_key',
-          password: null as any,
-          storage: Keychain.STORAGE_TYPE.AES_GCM,
-        })
-
-      const exists = await storage.hasWallet()
-      expect(exists).toBe(false)
-      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(2)
-    })
   })
 
   describe('edge cases - keychain return values', () => {
+    beforeEach(() => {
+      // Ensure getEnrolledLevelAsync is mocked
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+    })
+
     it('should handle keychain returning null instead of false', async () => {
       mockKeychain.getGenericPassword.mockResolvedValue(null as any)
 
@@ -883,7 +878,10 @@ describe('SecureStorage', () => {
   })
 
   describe('edge cases - timeout scenarios', () => {
-    it('should handle timeout with multiple concurrent operations', async () => {
+    it('should handle timeout with multiple concurrent operations on non-auth items', async () => {
+      // Re-setup mock after any previous test modifications
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+      
       // Create storage with short timeout for testing (minimum is 1000ms)
       const testStorage = createSecureStorage({ 
         logger: mockLogger,
@@ -894,10 +892,12 @@ describe('SecureStorage', () => {
       const neverResolves = new Promise(() => {})
       mockKeychain.getGenericPassword.mockReturnValue(neverResolves as any)
 
+      // Use getEncryptedSeed (requireAuth=false) so timeout applies
+      // getEncryptionKey with auth doesn't use timeout (waits for biometrics)
       const promises = [
-        testStorage.getEncryptionKey('user1@example.com'),
-        testStorage.getEncryptionKey('user2@example.com'),
-        testStorage.getEncryptionKey('user3@example.com'),
+        testStorage.getEncryptedSeed('user1@example.com'),
+        testStorage.getEncryptedSeed('user2@example.com'),
+        testStorage.getEncryptedSeed('user3@example.com'),
       ]
 
       // All should timeout
@@ -924,6 +924,11 @@ describe('SecureStorage', () => {
   })
 
   describe('edge cases - concurrent operations with same identifier', () => {
+    beforeEach(() => {
+      // Ensure getEnrolledLevelAsync is mocked
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+    })
+
     it('should handle concurrent get operations with same identifier', async () => {
       mockKeychain.getGenericPassword.mockResolvedValue({
         service: 'test',
@@ -956,6 +961,11 @@ describe('SecureStorage', () => {
   })
 
   describe('error handling edge cases', () => {
+    beforeEach(() => {
+      // Ensure getEnrolledLevelAsync is mocked
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+    })
+
     it('should handle ValidationError in error handler', async () => {
       // ValidationError is thrown during validation before operations,
       // so it doesn't go through handleSecureStorageError.
@@ -963,19 +973,17 @@ describe('SecureStorage', () => {
       await expect(storage.getEncryptionKey('invalid@#$identifier')).rejects.toThrow(ValidationError)
     })
 
-    it('should handle error in isDeviceAuthenticationAvailable', async () => {
-      // Make isEnrolledAsync throw an error
-      mockLocalAuth.isEnrolledAsync.mockRejectedValueOnce(new Error('Device auth check failed'))
+    it('should handle error in getDeviceSecurityLevel gracefully', async () => {
+      // Make getEnrolledLevelAsync throw an error
+      ;(mockLocalAuth as any).getEnrolledLevelAsync.mockRejectedValueOnce(new Error('Device security check failed'))
       
-      // This should be caught and return false
+      // setEncryptionKey should still work - it catches the error and assumes NONE
       await storage.setEncryptionKey('key')
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        'Failed to check device authentication availability',
-        expect.any(Error),
-        {}
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Failed to check device security level, assuming NONE',
+        expect.objectContaining({ error: expect.any(String) })
       )
     })
-
 
     it('should pass authenticationPrompt with custom options', async () => {
       const customStorage = createSecureStorage({

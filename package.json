@@ -58,6 +58,7 @@
     "react-native": ">=0.70.0"
   },
   "devDependencies": {
+    "@jest/test-sequencer": "^30.2.0",
     "@types/jest": "^29.5.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
