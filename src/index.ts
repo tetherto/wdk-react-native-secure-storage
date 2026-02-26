@@ -10,7 +10,12 @@
  */
 
 // Main types and factory
-export type { SecureStorage, SecureStorageOptions, AuthenticationOptions } from './secureStorage'
+export type {
+  SecureStorage,
+  SecureStorageOptions,
+  AuthenticationOptions,
+  SecureStorageItemOptions,
+} from './secureStorage'
 export { createSecureStorage } from './secureStorage'
 
 // Error classes
