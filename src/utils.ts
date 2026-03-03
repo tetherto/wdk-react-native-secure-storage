@@ -167,8 +167,10 @@ export async function withTimeout<T>(
     }, timeoutMs)
   })
   
-  const result = await Promise.race([promise, timeoutPromise])
-  clearTimeout(timeout)
-  return result
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
