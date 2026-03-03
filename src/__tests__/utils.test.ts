@@ -77,34 +77,34 @@ describe('utils', () => {
       await expect(withTimeout(promise, MIN_TIMEOUT_MS, 'test')).rejects.toThrow(TimeoutError)
     }, 5000)
 
-    it('should throw ValidationError for negative timeout', () => {
+    it('should throw ValidationError for negative timeout', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, -1000, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, -1000, 'test')).rejects.toThrow(ValidationError)
     })
 
-    it('should throw ValidationError for zero timeout', () => {
+    it('should throw ValidationError for zero timeout', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, 0, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, 0, 'test')).rejects.toThrow(ValidationError)
     })
 
-    it('should throw ValidationError for timeout below minimum', () => {
+    it('should throw ValidationError for timeout below minimum', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, MIN_TIMEOUT_MS - 1, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, MIN_TIMEOUT_MS - 1, 'test')).rejects.toThrow(ValidationError)
     })
 
-    it('should throw ValidationError for timeout above maximum', () => {
+    it('should throw ValidationError for timeout above maximum', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, MAX_TIMEOUT_MS + 1, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, MAX_TIMEOUT_MS + 1, 'test')).rejects.toThrow(ValidationError)
     })
 
-    it('should throw ValidationError for NaN timeout', () => {
+    it('should throw ValidationError for NaN timeout', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, NaN, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, NaN, 'test')).rejects.toThrow(ValidationError)
     })
 
-    it('should throw ValidationError for Infinity timeout', () => {
+    it('should throw ValidationError for Infinity timeout', async () => {
       const promise = Promise.resolve('success')
-      expect(() => withTimeout(promise, Infinity, 'test')).toThrow(ValidationError)
+      await expect(withTimeout(promise, Infinity, 'test')).rejects.toThrow(ValidationError)
     })
 
     it('should accept valid timeout values', async () => {
