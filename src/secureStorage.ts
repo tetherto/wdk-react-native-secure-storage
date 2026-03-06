@@ -43,6 +43,13 @@ export interface AuthenticationOptions {
 }
 
 /**
+ * Options for a single secure storage item
+ */
+export interface SecureStorageItemOptions {
+  requireBiometrics?: boolean
+}
+
+/**
  * Options for creating secure storage instance
  */
 export interface SecureStorageOptions {
@@ -67,8 +74,8 @@ export interface SecureStorage {
   isDeviceSecurityEnabled(): Promise<boolean>
   isBiometricAvailable(): Promise<boolean>
   authenticate(): Promise<boolean>
-  setEncryptionKey(key: string, identifier?: string): Promise<void>
-  getEncryptionKey(identifier?: string): Promise<string | null>
+  setEncryptionKey(key: string, identifier?: string, options?: SecureStorageItemOptions): Promise<void>
+  getEncryptionKey(identifier?: string, options?: SecureStorageItemOptions): Promise<string | null>
   setEncryptedSeed(encryptedSeed: string, identifier?: string): Promise<void>
   getEncryptedSeed(identifier?: string): Promise<string | null>
   setEncryptedEntropy(encryptedEntropy: string, identifier?: string): Promise<void>
@@ -490,8 +497,9 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      * @throws {KeychainWriteError} If keychain operation fails
      * @throws {TimeoutError} If operation times out
      */
-    async setEncryptionKey(key: string, identifier?: string): Promise<void> {
-      return setSecureValue(ENCRYPTION_KEY, key, identifier, true, true)
+    async setEncryptionKey(key: string, identifier?: string, options?: SecureStorageItemOptions): Promise<void> {
+      const requireAuth = options?.requireBiometrics ?? true
+      return setSecureValue(ENCRYPTION_KEY, key, identifier, requireAuth, true)
     },
 
     /**
@@ -505,8 +513,9 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      * @throws {KeychainReadError} If keychain operation fails
      * @throws {TimeoutError} If operation times out
      */
-    async getEncryptionKey(identifier?: string): Promise<string | null> {
-      return getSecureValue(ENCRYPTION_KEY, identifier)
+    async getEncryptionKey(identifier?: string, options?: SecureStorageItemOptions): Promise<string | null> {
+      const requireAuth = options?.requireBiometrics ?? true
+      return getSecureValue(ENCRYPTION_KEY, identifier, requireAuth)
     },
 
     /**
