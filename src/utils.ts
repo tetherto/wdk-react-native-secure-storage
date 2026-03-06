@@ -143,7 +143,7 @@ export async function getStorageKey(baseKey: StorageKey, identifier?: string): P
  * @throws {ValidationError} If timeoutMs is invalid
  * @throws {TimeoutError} If operation times out
  */
-export function withTimeout<T>(
+export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   operation: string
@@ -160,12 +160,17 @@ export function withTimeout<T>(
     )
   }
   
+  let timeout
   const timeoutPromise = new Promise<T>((_, reject) => {
-    setTimeout(() => {
+    timeout = setTimeout(() => {
       reject(new TimeoutError(`Operation ${operation} timed out after ${timeoutMs}ms`))
     }, timeoutMs)
   })
   
-  return Promise.race([promise, timeoutPromise])
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
