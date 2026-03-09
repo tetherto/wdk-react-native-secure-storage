@@ -1,6 +1,6 @@
 {
   "name": "@tetherto/wdk-react-native-secure-storage",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "Secure storage abstractions for React Native - provides secure storage for sensitive data (encrypted seeds, keys) using react-native-keychain",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -48,7 +48,7 @@
     "react-native-keychain",
     "keychain"
   ],
-  "author": "Tetherto",
+  "author": "Tether",
   "license": "Apache-2.0",
   "dependencies": {
     "expo-crypto": "^15.0.8",
