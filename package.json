@@ -48,7 +48,7 @@
     "react-native-keychain",
     "keychain"
   ],
-  "author": "Tetherto",
+  "author": "Tether",
   "license": "Apache-2.0",
   "dependencies": {
     "expo-crypto": "^15.0.8",
