@@ -21,6 +21,9 @@ jobs:
           node-version: lts/*
           registry-url: 'https://registry.npmjs.org'
       - run: |
+          npm install --ignore-scripts
+          npm run prepare --if-present
+      - run: |
           VERSION=$(node -p "require('./package.json').version")
           npm version $VERSION --no-git-tag-version --allow-same-version
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
