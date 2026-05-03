@@ -27,6 +27,7 @@ jest.mock('react-native-keychain', () => ({
   },
   ACCESS_CONTROL: {
     BIOMETRY_ANY_OR_DEVICE_PASSCODE: 'BIOMETRY_ANY_OR_DEVICE_PASSCODE',
+    DEVICE_PASSCODE: 'DEVICE_PASSCODE',
   },
   STORAGE_TYPE: {
     AES_CBC: 'KeystoreAESCBC',
@@ -48,6 +49,8 @@ jest.mock('expo-local-authentication', () => ({
     NONE: 0,
     SECRET: 1,
     BIOMETRIC: 2,
+    BIOMETRIC_WEAK: 2,
+    BIOMETRIC_STRONG: 3,
   },
 }))
 
@@ -90,8 +93,8 @@ describe('SecureStorage', () => {
     mockLocalAuth.isEnrolledAsync.mockResolvedValue(true)
     mockLocalAuth.hasHardwareAsync.mockResolvedValue(true)
     mockLocalAuth.authenticateAsync.mockResolvedValue({ success: true })
-    // Default to BIOMETRIC security level (device has authentication)
-    ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC
+    // Default to biometric security level (device has authentication)
+    ;(mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2) // SecurityLevel.BIOMETRIC_WEAK
     
     mockKeychain.setGenericPassword.mockResolvedValue({ 
       service: 'test', 
@@ -185,7 +188,17 @@ describe('SecureStorage', () => {
     });
 
     it('should store encryption key with biometrics by default', async () => {
-      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2); // BIOMETRIC
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2); // BIOMETRIC_WEAK
+
+      await storage.setEncryptionKey('test-key');
+
+      expect(mockKeychain.setGenericPassword).toHaveBeenCalledTimes(1);
+      const options = mockKeychain.setGenericPassword.mock.calls[0][2];
+      expect(options).toHaveProperty('accessControl', Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE);
+    });
+
+    it('should store encryption key with biometrics when security level is BIOMETRIC_STRONG', async () => {
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(3); // BIOMETRIC_STRONG
 
       await storage.setEncryptionKey('test-key');
 
@@ -195,13 +208,33 @@ describe('SecureStorage', () => {
     });
 
     it('should store encryption key with biometrics when requireBiometrics is true', async () => {
-        (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2); // BIOMETRIC
+        (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(2); // BIOMETRIC_WEAK
 
         await storage.setEncryptionKey('test-key', undefined, { requireBiometrics: true });
 
         expect(mockKeychain.setGenericPassword).toHaveBeenCalledTimes(1);
         const options = mockKeychain.setGenericPassword.mock.calls[0][2];
         expect(options).toHaveProperty('accessControl', Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE);
+    });
+
+    it('should use DEVICE_PASSCODE when device has PIN but no biometrics', async () => {
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(1); // SECRET
+
+      await storage.setEncryptionKey('test-key');
+
+      expect(mockKeychain.setGenericPassword).toHaveBeenCalledTimes(1);
+      const options = mockKeychain.setGenericPassword.mock.calls[0][2];
+      expect(options).toHaveProperty('accessControl', Keychain.ACCESS_CONTROL.DEVICE_PASSCODE);
+    });
+
+    it('should not set accessControl when device has no security', async () => {
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(0); // NONE
+
+      await storage.setEncryptionKey('test-key');
+
+      expect(mockKeychain.setGenericPassword).toHaveBeenCalledTimes(1);
+      const options = mockKeychain.setGenericPassword.mock.calls[0][2];
+      expect(options).not.toHaveProperty('accessControl');
     });
   })
 
@@ -297,6 +330,42 @@ describe('SecureStorage', () => {
       expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1);
       const options = mockKeychain.getGenericPassword.mock.calls[0][0];
       expect(options).toHaveProperty('authenticationPrompt');
+    });
+
+    it('should retrieve key with authentication when device has PIN but no biometrics', async () => {
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(1); // SECRET
+
+      mockKeychain.getGenericPassword.mockResolvedValue({
+        service: 'test',
+        username: 'wallet_encryption_key',
+        password: 'test-key',
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      })
+
+      const key = await storage.getEncryptionKey();
+
+      expect(key).toBe('test-key');
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1);
+      const options = mockKeychain.getGenericPassword.mock.calls[0][0];
+      expect(options).toHaveProperty('authenticationPrompt');
+    });
+
+    it('should retrieve key without authentication when device has no security', async () => {
+      (mockLocalAuth as any).getEnrolledLevelAsync.mockResolvedValue(0); // NONE
+
+      mockKeychain.getGenericPassword.mockResolvedValue({
+        service: 'test',
+        username: 'wallet_encryption_key',
+        password: 'test-key',
+        storage: Keychain.STORAGE_TYPE.AES_GCM,
+      })
+
+      const key = await storage.getEncryptionKey();
+
+      expect(key).toBe('test-key');
+      expect(mockKeychain.getGenericPassword).toHaveBeenCalledTimes(1);
+      const options = mockKeychain.getGenericPassword.mock.calls[0][0];
+      expect(options).not.toHaveProperty('authenticationPrompt');
     });
   })
 

@@ -292,12 +292,9 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
         getStorageKey(baseKey, identifier),
       ])
       
-      // Device has authentication if security level is not NONE
-      const deviceAuthAvailable = securityLevel !== LocalAuthentication.SecurityLevel.NONE
-      
       // If auth was requested but device has no security, log a warning but proceed without auth
       // Data will still be encrypted at rest by the OS, just not protected by user authentication
-      if (requireAuth && !deviceAuthAvailable) {
+      if (requireAuth && securityLevel === LocalAuthentication.SecurityLevel.NONE) {
         logger.warn('Device has no security configured. Storing data without authentication protection.', { 
           baseKey, 
           identifier,
@@ -310,7 +307,7 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
       const result = await withTimeout(
         Keychain.setGenericPassword(baseKey, value, {
           service: storageKey,
-          ...createKeychainOptions(deviceAuthAvailable, requireAuth, syncable),
+          ...createKeychainOptions(securityLevel, requireAuth, syncable),
         }),
         timeoutMs,
         `setSecureValue(${baseKey})`
@@ -395,14 +392,11 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
         getStorageKey(baseKey, identifier),
       ])
       
-      // Device has authentication if security level is not NONE
-      const deviceAuthAvailable = securityLevel !== LocalAuthentication.SecurityLevel.NONE
-      
       // If auth was requested but device has no security, read without auth
       // Data was stored without auth protection on this device, so we can read it without auth
-      const actuallyRequireAuth = requireAuth && deviceAuthAvailable
+      const actuallyRequireAuth = requireAuth && securityLevel !== LocalAuthentication.SecurityLevel.NONE
       
-      if (requireAuth && !deviceAuthAvailable) {
+      if (requireAuth && securityLevel === LocalAuthentication.SecurityLevel.NONE) {
         logger.warn('Device has no security configured. Reading data without authentication.', { 
           baseKey, 
           identifier,
@@ -618,8 +612,8 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      * Returns false only when wallet is definitively not found. Errors are thrown.
      * 
      * IMPORTANT: Only checks encrypted seed, NOT encryption key.
-     * Encryption key is protected with biometrics, so checking it would trigger
-     * an authentication prompt. Encrypted seed is stored without auth requirement,
+     * Encryption key can be protected with authentication, so checking it would
+     * trigger an authentication prompt. Encrypted seed is stored without auth requirement,
      * so checking it won't trigger biometrics.
      * 
      * @param identifier - Optional identifier (e.g., email) to support multiple wallets
@@ -630,8 +624,8 @@ export function createSecureStorage(options?: SecureStorageOptions): SecureStora
      */
     async hasWallet(identifier?: string): Promise<boolean> {
       // ONLY check encrypted seed - it does NOT require biometrics
-      // Encryption key is protected with ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE,
-      // so checking it would trigger a biometric prompt with the default
+      // Encryption key can be protected with keychain access control,
+      // so checking it could trigger an authentication prompt with the default
       // "Authenticate to retrieve secret" message from react-native-keychain.
       // By only checking the seed (which is stored without auth requirement),
       // we can determine wallet existence without triggering biometrics.

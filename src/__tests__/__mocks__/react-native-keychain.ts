@@ -10,6 +10,7 @@ export const ACCESSIBLE = {
 
 export const ACCESS_CONTROL = {
   BIOMETRY_ANY_OR_DEVICE_PASSCODE: 'BIOMETRY_ANY_OR_DEVICE_PASSCODE',
+  DEVICE_PASSCODE: 'DEVICE_PASSCODE',
 }
 
 let mockStorage: Map<string, { username: string; password: string }> = new Map()
