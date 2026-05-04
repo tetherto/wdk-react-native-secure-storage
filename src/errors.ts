@@ -19,6 +19,8 @@ export class SecureStorageError extends Error {
   }
 }
 
+
+
 /**
  * Error thrown when keychain operations fail
  * 
