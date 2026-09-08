@@ -107,6 +107,41 @@ const storage = createSecureStorage({
 await storage.setEncryptionKey('key', 'user@example.com')
 ```
 
+### Access control
+
+`setEncryptionKey` and `getEncryptionKey` accept per-item `SecureStorageItemOptions` with `requireBiometrics?: boolean`, which defaults to `true`.
+
+When writing an encryption key, the library selects these `react-native-keychain` access controls on iOS and Android:
+
+| `requireBiometrics` | Device security at write time | Access control |
+| --- | --- | --- |
+| `true` (default) | Biometrics enrolled | `BIOMETRY_ANY_OR_DEVICE_PASSCODE` (biometrics or device credentials) |
+| `true` (default) | PIN/passcode only | `DEVICE_PASSCODE` |
+| `true` (default) | No screen lock | None; the library logs a warning and still stores the key |
+| `false` | Any | None; the key remains encrypted at rest without item authentication protection |
+
+Access control is established **when the item is stored**. A key stored with `requireBiometrics: false` does not gain protection from a later `getEncryptionKey(..., { requireBiometrics: true })` call. Re-store it with `requireBiometrics: true` on a device with security enabled to add protection. Likewise, passing `false` on a read does not remove an existing item's protection.
+
+Reading a protected item with `requireBiometrics: true` lets the OS authenticate inside `getEncryptionKey`. The prompt uses `authentication.promptMessage` and `authentication.cancelLabel` from `createSecureStorage()`. Prompt display and authentication reuse are controlled by the OS; a read does not necessarily show a new prompt every time. An item stored without access control does not acquire an OS authentication requirement from these prompt options.
+
+```typescript
+const storage = createSecureStorage({
+  authentication: { promptMessage: 'Unlock your wallet' },
+})
+
+// Protected by the device's available authentication (the default).
+await storage.setEncryptionKey('my-encryption-key', 'wallet', { requireBiometrics: true })
+const key = await storage.getEncryptionKey('wallet', { requireBiometrics: true })
+
+// Explicitly store a separate item without authentication protection.
+await storage.setEncryptionKey('another-key', 'background-wallet', { requireBiometrics: false })
+const backgroundKey = await storage.getEncryptionKey('background-wallet', { requireBiometrics: false })
+```
+
+Pass `undefined` for the identifier to use these options with the default wallet. `authenticate()` is a standalone app-level prompt via `expo-local-authentication`; calling it does not add access control to any stored item.
+
+Devices without a screen lock currently allow storage and retrieval without authentication even when `requireBiometrics` is `true`. See [#34](https://github.com/tetherto/wdk-react-native-secure-storage/issues/34) for the discussion of this behavior.
+
 ### Error Handling
 
 ```typescript
@@ -172,32 +207,34 @@ For most apps, you should create one instance and reuse it throughout your appli
 
 **Options:**
 - `logger?: Logger` - Custom logger instance
-- `authentication?: AuthenticationOptions` - Authentication prompt configuration
+- `authentication?: AuthenticationOptions` - Prompt configuration for `authenticate()` and protected encryption-key reads; see [Access control](#access-control)
 - `timeoutMs?: number` - Timeout for keychain operations (default: 30000ms, min: 1000ms, max: 300000ms)
 
 **Returns:** `SecureStorage` instance
 
 ### `SecureStorage` Interface
 
-#### `setEncryptionKey(key: string, identifier?: string): Promise<void>`
+#### `setEncryptionKey(key: string, identifier?: string, options?: SecureStorageItemOptions): Promise<void>`
 
 Stores an encryption key securely.
 
 **Parameters:**
 - `key: string` - The encryption key (max 10KB, non-empty)
 - `identifier?: string` - Optional identifier for multiple wallets (max 256 chars)
+- `options?: SecureStorageItemOptions` - `requireBiometrics` defaults to `true` and sets the item access control at write time; see [Access control](#access-control)
 
 **Throws:**
 - `ValidationError` - If input is invalid
 - `KeychainWriteError` - If keychain operation fails
 - `TimeoutError` - If operation times out
 
-#### `getEncryptionKey(identifier?: string): Promise<string | null>`
+#### `getEncryptionKey(identifier?: string, options?: SecureStorageItemOptions): Promise<string | null>`
 
 Retrieves an encryption key.
 
 **Parameters:**
 - `identifier?: string` - Optional identifier
+- `options?: SecureStorageItemOptions` - `requireBiometrics` defaults to `true`; authenticates reads of protected items without changing their stored access control
 
 **Returns:** The encryption key or `null` if not found
 
@@ -403,7 +440,7 @@ This module is production-ready and includes:
 - Cloud sync behavior:
   - **Encryption key**: Synced via iCloud Keychain (iOS) and Google Cloud backup (Android)
   - **Encrypted seed and entropy**: Device-only storage (not synced across devices)
-- Biometric authentication required when available
+- Encryption keys require biometric or device authentication by default when available; callers can opt out with `requireBiometrics: false`. See [Access control](#access-control) for write-time protection and the no-screen-lock behavior
 - Device-level keychain/keystore provides rate limiting and lockout mechanisms
 - **No sensitive data is logged** - The logger only logs error messages and metadata
 
