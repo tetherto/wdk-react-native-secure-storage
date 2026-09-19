@@ -2,6 +2,12 @@
 
 Secure storage abstractions for React Native - provides secure storage for sensitive data (encrypted seeds, keys) using react-native-keychain.
 
+## ⚠️ Deprecated
+
+This package has been inlined into `@tetherto/wdk-react-native-core` (see [tetherto/wdk-react-native-core#108](https://github.com/tetherto/wdk-react-native-core/issues/108)) and is no longer maintained here.
+New consumers should use `wdk-react-native-core`'s internal `secureStorage` module instead.
+No further changes will be made to this package.
+
 ## Features
 
 - 🔒 Secure storage using native keychain/keystore
